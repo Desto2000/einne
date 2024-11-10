@@ -29,24 +29,14 @@ class Graph:
     def visualize(self):
         """Enhanced visualization for clarity using networkx and matplotlib."""
         plt.figure(figsize=(12, 8))
-
-        # Pozisyonların daha düzenli ayarlanması
         pos = nx.spring_layout(self.nx_graph, seed=42)
-
-        # Ana modülleri daha büyük boyutlandırma
         nx.draw_networkx_nodes(self.nx_graph, pos, node_size=2500, node_color="skyblue", label="Main Modules")
-
-        # Kenarları ve etiketleri çizdirme
         nx.draw_networkx_edges(self.nx_graph, pos, arrows=True)
         nx.draw_networkx_labels(self.nx_graph, pos, font_size=9, font_weight="bold", verticalalignment="center")
-
-        # Kenar etiketlerini daha belirgin konumlandırma
         edge_labels = nx.get_edge_attributes(self.nx_graph, 'type')
         nx.draw_networkx_edge_labels(
             self.nx_graph, pos, edge_labels=edge_labels, font_size=8, label_pos=0.5, verticalalignment="center_baseline"
         )
-
-        # Başlık ve açıklama ekleme
         plt.legend(loc="upper left")
         plt.title("Enhanced Graph Visualization with Submodules")
         plt.show()
