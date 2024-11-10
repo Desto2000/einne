@@ -58,91 +58,90 @@ class Node(torch.nn.Module):
     _graph: Optional[Graph]
 
     def __init__(self, name=None, threshold_steps=50, max_history: int = 100):
-        self.name = name or self.__class__.__name__
         super().__init__()
+        self.name = name or self.__class__.__name__
         self._graph = None
         self._threshold_steps = threshold_steps
+        self._init_history_buffers(max_history)
+        self._init_hooks()
+        self._init_step_counters()
+
+    def _init_history_buffers(self, max_history):
         self._inputs = deque(maxlen=max_history)
         self._outputs = deque(maxlen=max_history)
         self._grad_inputs = deque(maxlen=max_history)
         self._grad_outputs = deque(maxlen=max_history)
+
+    def _init_hooks(self):
         self.register_forward_hook(self._forward_hook)
         self.register_full_backward_hook(self._backward_hook)
+
+    def _init_step_counters(self):
         self._fwd_step = 0
         self._bck_step = 0
 
     def _forward_hook(self, module, inputs, outputs):
         self._fwd_step += 1
-        if self._fwd_step >= self._threshold_steps:
-            self._inputs.append(
-                [inp.detach().cpu() if isinstance(inp, torch.Tensor) else inp for inp in inputs]
-            )
-            self._outputs.append(
-                outputs.detach().cpu() if isinstance(outputs, torch.Tensor) else tuple(
-                    out.detach().cpu() for out in outputs
-                )
-            )
-            if self._graph is not None:
-                self._graph.log_computation(
-                    self.name, 'forward', {'inputs': inputs, 'outputs': outputs}
-                )
+        if self._should_log_step(self._fwd_step):
+            self._log_forward(inputs, outputs)
             self._fwd_step = 0
         return outputs
 
     def _backward_hook(self, module, grad_inputs, grad_outputs):
         self._bck_step += 1
-
-        if self._bck_step >= self._threshold_steps:
-            self._grad_inputs.append(
-                [grad.detach().cpu() if grad is not None else None for grad in grad_inputs]
-            )
-            self._grad_outputs.append(
-                [grad.detach().cpu() if grad is not None else None for grad in grad_outputs]
-            )
-            self._graph.log_computation(
-                self.name, 'backward', {'grad_inputs': grad_inputs, 'grad_outputs': grad_outputs}
-            )
+        if self._should_log_step(self._bck_step):
+            self._log_backward(grad_inputs, grad_outputs)
             self._bck_step = 0
         return grad_inputs
 
+    def _should_log_step(self, step):
+        return step >= self._threshold_steps
+
+    def _log_forward(self, inputs, outputs):
+        self._inputs.append(self._detach_and_cpu(inputs))
+        self._outputs.append(self._detach_and_cpu(outputs))
+        if self._graph:
+            self._graph.log_computation(self.name, 'forward', {'inputs': inputs, 'outputs': outputs})
+
+    def _log_backward(self, grad_inputs, grad_outputs):
+        self._grad_inputs.append(self._detach_and_cpu(grad_inputs, allow_none=True))
+        self._grad_outputs.append(self._detach_and_cpu(grad_outputs, allow_none=True))
+        if self._graph:
+            self._graph.log_computation(self.name, 'backward', {'grad_inputs': grad_inputs, 'grad_outputs': grad_outputs})
+
+    @staticmethod
+    def _detach_and_cpu(tensors, allow_none=False):
+        if isinstance(tensors, torch.Tensor):
+            return tensors.detach().cpu()
+        return [t.detach().cpu() if isinstance(t, torch.Tensor) else (None if allow_none else t) for t in tensors]
+
     @property
     def graph(self) -> Optional[Graph]:
-        """Get the current graph"""
         return self._graph
 
     @graph.setter
     def graph(self, new_graph: Graph) -> None:
-        """Set the graph and propagate to children"""
         if new_graph is not self._graph:
             self._graph = new_graph
-            if self._graph is not None:
-                self._graph.add_node(self.name, self)
-            # Propagate to children
+            self._update_graph_structure()
+
+    def _update_graph_structure(self):
+        if self._graph:
+            self._graph.add_node(self.name, self)
             for name, child in self.named_children():
                 if isinstance(child, Node):
-                    child.graph = new_graph
-                    if new_graph is not None:
-                        new_graph.add_edge(self.name, child.name)
-
-    def _reset(self):
-        if self._graph is not None:
-            self._graph.add_node(self.name, self)
-        for name, child in self.named_children():
-            if isinstance(child, Node):
-                child.graph = self._graph
-                if self._graph is not None:
-                    self._graph.add_node(child.name, self)
+                    child.graph = self._graph
                     self._graph.add_edge(self.name, child.name)
 
+    def _reset(self):
+        self._update_graph_structure()
+
     def __call__(self, *args, first=False, **kwargs):
-        if first and not hasattr(self, '_graph') or self._graph is None:
+        if first and (not hasattr(self, '_graph') or self._graph is None):
             self.graph = Graph()
         self._reset()
         return super().__call__(*args, **kwargs)
 
     def clear_history(self) -> None:
-        """Clear all tracking history"""
-        self._inputs.clear()
-        self._outputs.clear()
-        self._grad_inputs.clear()
-        self._grad_outputs.clear()
+        for buffer in [self._inputs, self._outputs, self._grad_inputs, self._grad_outputs]:
+            buffer.clear()
