@@ -9,33 +9,56 @@ import torch
 
 @dataclass
 class Graph:
-    computation_history: collections.deque = field(default_factory=lambda: collections.deque(maxlen=1000))
+    computation_history: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=1000)
+    )
     nx_graph: nx.DiGraph = field(default_factory=nx.DiGraph)  # NetworkX graph instance
 
-    def add_node(self, node_id: str, node: 'Node') -> None:
+    def add_node(self, node_id: str, node: "Node") -> None:
         """Add a node to the NetworkX graph."""
         self.nx_graph.add_node(node_id, node=node)  # Add node to NetworkX graph
 
-    def add_edge(self, from_node: str, to_node: str, edge_type: str = 'forward') -> None:
+    def add_edge(
+        self, from_node: str, to_node: str, edge_type: str = "forward"
+    ) -> None:
         """Add a directed edge between nodes on NetworkX graph."""
-        self.nx_graph.add_edge(from_node, to_node, type=edge_type)  # Add edge to NetworkX graph
+        self.nx_graph.add_edge(
+            from_node, to_node, type=edge_type
+        )  # Add edge to NetworkX graph
 
     def log_computation(self, node_id: str, computation_type: str, data: Any) -> None:
         """Log computation events in the graph."""
         self.computation_history.append(
-            {'node_id': node_id, 'type': computation_type, 'data': data}
+            {"node_id": node_id, "type": computation_type, "data": data}
         )
 
     def visualize(self):
         """Enhanced visualization for clarity using networkx and matplotlib."""
         plt.figure(figsize=(12, 8))
         pos = nx.spring_layout(self.nx_graph, seed=42)
-        nx.draw_networkx_nodes(self.nx_graph, pos, node_size=2500, node_color="skyblue", label="Main Modules")
+        nx.draw_networkx_nodes(
+            self.nx_graph,
+            pos,
+            node_size=2500,
+            node_color="skyblue",
+            label="Main Modules",
+        )
         nx.draw_networkx_edges(self.nx_graph, pos, arrows=True)
-        nx.draw_networkx_labels(self.nx_graph, pos, font_size=9, font_weight="bold", verticalalignment="center")
-        edge_labels = nx.get_edge_attributes(self.nx_graph, 'type')
+        nx.draw_networkx_labels(
+            self.nx_graph,
+            pos,
+            font_size=9,
+            font_weight="bold",
+            verticalalignment="center",
+        )
+        edge_labels = nx.get_edge_attributes(self.nx_graph, "type")
         nx.draw_networkx_edge_labels(
-            self.nx_graph, pos, edge_labels=edge_labels, font_size=8, label_pos=0.5, verticalalignment="center_baseline"
+            self.nx_graph,
+            pos,
+            edge_labels=edge_labels,
+            font_size=8,
+            label_pos=0.5,
+            verticalalignment="center_baseline",
         )
         plt.legend(loc="upper left")
         plt.title("Enhanced Graph Visualization with Submodules")
@@ -96,7 +119,9 @@ class Node(torch.nn.Module):
         self._inputs.append(self._detach_and_cpu(inputs))
         self._outputs.append(self._detach_and_cpu(outputs))
         if self._graph:
-            self._graph.log_computation(self.name, 'forward', {'inputs': inputs, 'outputs': outputs})
+            self._graph.log_computation(
+                self.name, "forward", {"inputs": inputs, "outputs": outputs}
+            )
 
     def _log_backward(self, grad_inputs, grad_outputs) -> None:
         """Log backward pass gradients."""
@@ -104,7 +129,9 @@ class Node(torch.nn.Module):
         self._grad_outputs.append(self._detach_and_cpu(grad_outputs, allow_none=True))
         if self._graph:
             self._graph.log_computation(
-                self.name, 'backward', {'grad_inputs': grad_inputs, 'grad_outputs': grad_outputs}
+                self.name,
+                "backward",
+                {"grad_inputs": grad_inputs, "grad_outputs": grad_outputs},
             )
 
     @staticmethod
@@ -113,7 +140,14 @@ class Node(torch.nn.Module):
         with torch.no_grad():
             if isinstance(tensors, torch.Tensor):
                 return tensors.detach().cpu()
-            return [t.detach().cpu() if isinstance(t, torch.Tensor) else (None if allow_none else t) for t in tensors]
+            return [
+                (
+                    t.detach().cpu()
+                    if isinstance(t, torch.Tensor)
+                    else (None if allow_none else t)
+                )
+                for t in tensors
+            ]
 
     @property
     def graph(self) -> Optional[Graph]:
@@ -149,5 +183,10 @@ class Node(torch.nn.Module):
 
     def clear_history(self) -> None:
         """Clear the history buffers."""
-        for buffer in [self._inputs, self._outputs, self._grad_inputs, self._grad_outputs]:
+        for buffer in [
+            self._inputs,
+            self._outputs,
+            self._grad_inputs,
+            self._grad_outputs,
+        ]:
             buffer.clear()
