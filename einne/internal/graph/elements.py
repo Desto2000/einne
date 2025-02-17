@@ -13,6 +13,7 @@ class Graph:
         default_factory=lambda: collections.deque(maxlen=1000)
     )
     nx_graph: nx.DiGraph = field(default_factory=nx.DiGraph)  # NetworkX graph instance
+    names = collections.Counter()
 
     def add_node(self, node_id: str, node: "Node") -> None:
         """Add a node to the NetworkX graph."""
@@ -21,10 +22,38 @@ class Graph:
     def add_edge(
         self, from_node: str, to_node: str, edge_type: str = "forward"
     ) -> None:
-        """Add a directed edge between nodes on NetworkX graph."""
-        self.nx_graph.add_edge(
-            from_node, to_node, type=edge_type
-        )  # Add edge to NetworkX graph
+        """Add a directed edge between nodes with additional validation."""
+        if from_node not in self.nx_graph or to_node not in self.nx_graph:
+            raise ValueError(
+                f"Nodes {from_node} or {to_node} do not exist in the graph"
+            )
+        self.nx_graph.add_edge(from_node, to_node, type=edge_type)
+
+    def remove_node(self, node_id: str) -> None:
+        """
+        Safely remove a node and its associated edges from the graph.
+
+        Args:
+            node_id (str): Identifier of the node to remove
+
+        Raises:
+            ValueError: If the node does not exist
+        """
+        if node_id not in self.nx_graph:
+            raise ValueError(f"Node {node_id} does not exist in the graph")
+
+        # Remove node and all its connected edges
+        self.nx_graph.remove_node(node_id)
+
+        # Clean up computation history related to this node
+        self.computation_history = collections.deque(
+            [
+                entry
+                for entry in self.computation_history
+                if entry["node_id"] != node_id
+            ],
+            maxlen=1000,
+        )
 
     def log_computation(self, node_id: str, computation_type: str, data: Any) -> None:
         """Log computation events in the graph."""
@@ -32,50 +61,77 @@ class Graph:
             {"node_id": node_id, "type": computation_type, "data": data}
         )
 
-    def visualize(self):
-        """Enhanced visualization for clarity using networkx and matplotlib."""
+    def visualize(self, layout_algorithm="spring", color_map=None, node_size=2500):
+        """
+        More flexible graph visualization with multiple layout options.
+
+        Args:
+            layout_algorithm (str): Layout method for node positioning
+                ('spring', 'circular', 'kamada_kawai', etc.)
+            color_map (dict): Custom color mapping for nodes
+            node_size (int): Size of nodes in the visualization
+        """
         plt.figure(figsize=(12, 8))
-        pos = nx.spring_layout(self.nx_graph, seed=42)
+
+        # Support multiple layout algorithms
+        layout_algorithms = {
+            "spring": nx.spring_layout,
+            "circular": nx.circular_layout,
+            "kamada_kawai": nx.kamada_kawai_layout,
+            "spectral": nx.spectral_layout,
+        }
+
+        pos = layout_algorithms.get(layout_algorithm, nx.spring_layout)(
+            self.nx_graph, seed=42
+        )
+
+        # Flexible node coloring
+        default_color = "skyblue"
+        node_colors = [
+            color_map.get(node, default_color) for node in self.nx_graph.nodes()
+        ]
+
         nx.draw_networkx_nodes(
+            self.nx_graph, pos, node_size=node_size, node_color=node_colors, alpha=0.8
+        )
+        nx.draw_networkx_edges(
             self.nx_graph,
             pos,
-            node_size=2500,
-            node_color="skyblue",
-            label="Main Modules",
+            arrows=True,
+            edge_color="gray",
+            connectionstyle="arc3,rad=0.1",
         )
-        nx.draw_networkx_edges(self.nx_graph, pos, arrows=True)
-        nx.draw_networkx_labels(
-            self.nx_graph,
-            pos,
-            font_size=9,
-            font_weight="bold",
-            verticalalignment="center",
-        )
-        edge_labels = nx.get_edge_attributes(self.nx_graph, "type")
-        nx.draw_networkx_edge_labels(
-            self.nx_graph,
-            pos,
-            edge_labels=edge_labels,
-            font_size=8,
-            label_pos=0.5,
-            verticalalignment="center_baseline",
-        )
-        plt.legend(loc="upper left")
-        plt.title("Enhanced Graph Visualization with Submodules")
+        nx.draw_networkx_labels(self.nx_graph, pos, font_size=9, font_weight="bold")
+
+        plt.title("Enhanced Computational Graph Visualization")
+        plt.axis("off")
+        plt.tight_layout()
         plt.show()
+
+    def get_name(self, name):
+        self.names[name] += 1
+        return f"{name}_{self.names[name]}"
 
 
 class Node(torch.nn.Module):
     _graph: Optional[Graph]
 
-    def __init__(self, name=None, threshold_steps=50, max_history: int = 100):
+    def __init__(
+        self,
+        name=None,
+        logging=False,
+        threshold_steps=50,
+        max_history: int = 100,
+    ):
         super().__init__()
-        self.name = name or self.__class__.__name__
+        self._name = name or self.__class__.__name__
         self._graph = None
         self._threshold_steps = threshold_steps
-        self._init_history_buffers(max_history)
-        self._init_hooks()
-        self._init_step_counters()
+        self._logging = logging
+        if self._logging:
+            self._init_history_buffers(max_history)
+            self._init_hooks()
+            self._init_step_counters()
 
     def _init_history_buffers(self, max_history: int) -> None:
         """Initialize history buffers for inputs, outputs, and gradients."""
@@ -158,21 +214,35 @@ class Node(torch.nn.Module):
     def graph(self, new_graph: Graph) -> None:
         """Set a new graph and update the graph structure."""
         if new_graph is not self._graph:
-            self._graph = new_graph
-            self._update_graph_structure()
+            self.name = new_graph.get_name(self._name or self.__class__.__name__)
+        self._graph = new_graph
+        self._update_graph_structure()
+
+    @graph.deleter
+    def graph(self) -> None:
+        self._graph = None
 
     def _update_graph_structure(self) -> None:
         """Update the graph with the node and its children."""
-        if self._graph:
-            self._graph.add_node(self.name, self)
+        if self.graph:
+            self.graph.add_node(self.name, self)
             for name, child in self.named_children():
                 if isinstance(child, Node):
-                    child.graph = self._graph
-                    self._graph.add_edge(self.name, child.name)
+                    child.graph = self.graph
+                    self.graph.add_edge(self.name, child.name)
 
     def _reset(self) -> None:
         """Reset the graph structure."""
         self._update_graph_structure()
+
+    def __del__(self):
+        """
+        Ensure the Node is removed from its graph and all references to it
+        are cleared to facilitate garbage collection.
+        """
+        if self.graph is not None and self.name in self.graph.nx_graph.nodes:
+            self.graph.nx_graph.remove_node(self.name)
+        del self.graph
 
     def __call__(self, *args, first=False, **kwargs):
         """Override the call method to reset the graph and perform the forward pass."""

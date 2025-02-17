@@ -1,4 +1,4 @@
-from .grad import clip_gradients
-from .initializers import rnn_param_init, precompute_freqs_cis
 from .activations import ProbabilisticActivation
-import attention
+from .attention import *
+from .grad import clip_gradients, SqrtBoundDerivative
+from .initializers import precompute_freqs_cis, rnn_param_init

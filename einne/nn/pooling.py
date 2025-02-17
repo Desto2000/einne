@@ -11,5 +11,9 @@ class SelfAttPooling(nn.Module):
 
     def forward(self, x, keepdims=False):
         n_state = x.size(-1) // self.num_heads
-        attention_weights = F.softmax(torch.matmul(x, x.transpose(-2, -1)) * (1.0 / np.sqrt(n_state)), dim=-1)
-        return torch.max(torch.matmul(attention_weights, x), dim=-2, keepdim=keepdims)[0]
+        attention_weights = F.softmax(
+            torch.matmul(x, x.transpose(-2, -1)) * (1.0 / np.sqrt(n_state)), dim=-1
+        )
+        return torch.max(torch.matmul(attention_weights, x), dim=-2, keepdim=keepdims)[
+            0
+        ]

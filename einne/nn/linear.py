@@ -11,7 +11,10 @@ class BlockDiagonalLinear(nn.Module):
         self.width = width
         self.num_blocks = num_blocks
         self.block_width = width // num_blocks
-        self.w = nn.Parameter(torch.empty([num_blocks, self.block_width, self.block_width]))
+        self.w = nn.Parameter(
+            torch.empty([num_blocks, self.block_width, self.block_width])
+        )
+        self.w_init_variance_scale = w_init_variance_scale
         self.reset_parameters()
 
     def reset_parameters(self):

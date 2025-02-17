@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-import einne.nn.functional as fe
 from einne.nn.gating import RG, TokenSelection
 
 
@@ -18,8 +17,8 @@ class RGSAttention(nn.Module):
         self.output_head = nn.Linear(model_dim, model_dim, bias=False)
         self.recurrent_gating = RG(model_dim, num_heads, weight_init_variance_scale)
         self.feature_selection = TokenSelection(model_dim, num_heads)
-        self.probability_activation = fe.ProbabilisticActivation()
-        self.probability_activation2 = fe.ProbabilisticActivation()
+        self.probability_activation = nn.Softmax(dim=-1)
+        self.probability_activation2 = nn.Softmax(dim=-1)
         self.output_layer = nn.Linear(model_dim, model_dim, bias=False)
         self.reset_parameters()
 
@@ -28,7 +27,7 @@ class RGSAttention(nn.Module):
 
     def compute_attention_space(self, input_tensor):
         spatial_attention_output = self.spatial_attention(
-            torch.einsum("batch_len_dim,dim_dim->batch_len_dim", input_tensor, self.attention_space)
+            torch.einsum("bld,dd->bld", input_tensor, self.attention_space)
         )
         gated_input = self.recurrent_gating(input_tensor, spatial_attention_output)
         sparsity = self.probability_activation(self.input_silhouette(input_tensor))
@@ -36,14 +35,18 @@ class RGSAttention(nn.Module):
 
     def calculate_attention_scores(self, query, key, value):
         attention_weights = self.probability_activation2(
-            torch.matmul(query, key.transpose(-2, -1)) * (1.0 / np.sqrt(query.size(-1) // self.num_heads))
+            torch.matmul(query, key.transpose(-2, -1))
+            * (1.0 / np.sqrt(query.size(-1) // self.num_heads))
         )
         return torch.matmul(attention_weights, value)
 
     def forward(self, input_tensor):
         output_head = F.gelu(self.output_head(input_tensor))
         attention_space_output = self.compute_attention_space(input_tensor)
-        context = self.calculate_attention_scores(
-            attention_space_output, attention_space_output, attention_space_output
-        ) * output_head
+        context = (
+            self.calculate_attention_scores(
+                attention_space_output, attention_space_output, attention_space_output
+            )
+            * output_head
+        )
         return self.output_layer(context)

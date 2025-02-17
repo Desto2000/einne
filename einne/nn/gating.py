@@ -12,24 +12,36 @@ class TokenSelection(nn.Module):
         super().__init__()
         self.model_dim = model_dim
         self.num_selections = num_selections
-        self.classifiers = nn.ModuleList([nn.Linear(model_dim, 1) for _ in range(num_selections)])
+        self.classifiers = nn.ModuleList(
+            [nn.Linear(model_dim, 1) for _ in range(num_selections)]
+        )
         self.token_weights = nn.Parameter(torch.empty((num_selections, 1)))
         self.prelu = nn.PReLU()
-        self.probability_activation = fe.ProbabilisticActivation(activation="ripplemoe", num_experts=num_selections)
+        self.probability_activation = nn.Softmax(dim=-1)
         self.reset_parameters()
 
     def reset_parameters(self):
         nn.init.kaiming_normal_(self.token_weights, nonlinearity="linear")
 
     def forward(self, input_tensor):
-        token_scores = torch.stack([classifier(input_tensor).squeeze(-1) for classifier in self.classifiers])
-        prelu_scores = self.prelu(token_scores)
-        token_scores = F.celu(prelu_scores) * F.silu(prelu_scores) + F.gelu(prelu_scores)
-        combined_scores = torch.einsum(
-            'selection,selection...->...', F.selu(self.token_weights.squeeze(-1)), token_scores
+        token_scores = torch.stack(
+            [classifier(input_tensor).squeeze(-1) for classifier in self.classifiers]
         )
-        top_k_indices = torch.topk(combined_scores, k=input_tensor.size(1), dim=-1).indices
-        importance = torch.ones_like(combined_scores).scatter_add(-1, top_k_indices, token_scores.sum(0))
+        prelu_scores = self.prelu(token_scores)
+        token_scores = F.celu(prelu_scores) * F.silu(prelu_scores) + F.gelu(
+            prelu_scores
+        )
+        combined_scores = torch.einsum(
+            "s,s...->...",
+            F.selu(self.token_weights.squeeze(-1)),
+            token_scores,
+        )
+        top_k_indices = torch.topk(
+            combined_scores, k=input_tensor.size(1), dim=-1
+        ).indices
+        importance = torch.ones_like(combined_scores).scatter_add(
+            -1, top_k_indices, token_scores.sum(0)
+        )
         return 1 + self.probability_activation(importance).unsqueeze(-1)
 
 
@@ -38,8 +50,12 @@ class RG(nn.Module):
         super().__init__()
         self.model_dim = model_dim
         self.num_heads = num_heads
-        self.input_gate = BlockDiagonalLinear(model_dim, num_heads, weight_init_variance_scale)
-        self.a_gate = BlockDiagonalLinear(model_dim, num_heads, weight_init_variance_scale)
+        self.input_gate = BlockDiagonalLinear(
+            model_dim, num_heads, weight_init_variance_scale
+        )
+        self.a_gate = BlockDiagonalLinear(
+            model_dim, num_heads, weight_init_variance_scale
+        )
         self.state_pool = SelfAttPooling(num_heads)
         self.a_param = nn.Parameter(torch.empty([model_dim]))
         self.reset_parameters()

@@ -1,9 +1,12 @@
 import torch
+from torch import nn
 
 
-def rnn_param_init(tensor, min_rad, max_rad, transform="softplus", epsilon=1e-8):
+def rnn_param_init(
+    tensor: nn.Parameter, min_rad, max_rad, transform="softplus", epsilon=1e-8
+):
     with torch.no_grad():
-        tensor.uniform_(min_rad ** 2 + epsilon, max_rad ** 2 + epsilon).log_().mul_(0.5)
+        tensor.uniform_(min_rad**2 + epsilon, max_rad**2 + epsilon).log_().mul_(0.5)
         if transform == "softplus":
             return tensor.neg_().exp_().sub_(1.0).log_()
         else:
